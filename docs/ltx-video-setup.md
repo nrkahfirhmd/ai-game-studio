@@ -25,17 +25,23 @@ Restart ComfyUI (`python main.py`). It serves http://127.0.0.1:8188.
 
 ## 2. Download models
 
-### LTX-Video 2B checkpoint (~6 GB)
+### LTX-Video 2B checkpoint (~9 GB)
 
-Public, not gated. Pick the latest **2B** file from
-[Lightricks/LTX-Video](https://huggingface.co/Lightricks/LTX-Video/tree/main)
-(NOT the 13B — too big for 24 GB).
+Public, not gated. Repo tree (check for a newer 2B file):
+[Lightricks/LTX-Video](https://huggingface.co/Lightricks/LTX-Video/tree/main).
+**Not** the `ltxv-13b-*` files — too big for 24 GB.
 
 ```bash
 cd /path/to/ComfyUI/models/checkpoints
-curl -L -o ltx-video-2b-v0.9.6.safetensors \
-  "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.6.safetensors?download=true"
+curl -L -o ltxv-2b-0.9.6-dev-04-25.safetensors \
+  "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-2b-0.9.6-dev-04-25.safetensors?download=true"
 ```
+
+Alternatives in the same repo:
+- `ltxv-2b-0.9.6-distilled-04-25.safetensors` — ~8-step, 2–3× faster on M5, but
+  needs the *distilled* template (fewer steps, different scheduler). Do this
+  after the dev model works.
+- `ltx-video-2b-v0.9.5.safetensors` — older, very stable, what most tutorials target.
 
 ### Text encoder (T5) — you already have this
 
