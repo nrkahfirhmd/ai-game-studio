@@ -43,9 +43,21 @@ export interface ProviderHealth {
   image: BackendHealth;
 }
 
+export interface FramesRequest {
+  /** data: URL of the reference sprite */
+  image: string;
+  /** motion prompt (+ any directives) — used by text-conditioned video models */
+  prompt: string;
+  seed?: number;
+}
+
+/** Ordered animation frames as base64 PNGs, before chroma-keying. */
+export type FramesResponse = string[];
+
 export interface AIProvider {
   generateText(req: TextGenerationRequest): Promise<TextGenerationResponse>;
   generateImage(req: ImageGenerationRequest): Promise<ImageGenerationResponse>;
+  generateFrames(req: FramesRequest): Promise<FramesResponse>;
   health(): Promise<ProviderHealth>;
 }
 

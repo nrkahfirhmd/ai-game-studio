@@ -7,7 +7,7 @@ import type {
 
 // Fallbacks only — the real list + default come from /api/models/*.
 export const DEFAULT_IMAGE_MODEL = "flux1-schnell-fp8.safetensors";
-export const DEFAULT_VIDEO_MODEL = "flux1-schnell-fp8.safetensors";
+export const DEFAULT_VIDEO_MODEL = "svd_xt.safetensors";
 
 export type AppStatus =
   | "idle"

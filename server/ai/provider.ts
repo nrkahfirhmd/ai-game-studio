@@ -8,6 +8,7 @@ import type { AIProvider } from "./types.js";
 const provider: AIProvider = {
   generateText: ollama.generateText,
   generateImage: comfyui.generateImage,
+  generateFrames: (req) => comfyui.generateVideoFrames(req),
   async health() {
     const [text, image] = await Promise.all([ollama.health(), comfyui.health()]);
     return { text, image };

@@ -10,23 +10,17 @@ function int(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function float(name: string, fallback: number): number {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) ? n : fallback;
-}
-
 function bool(name: string, fallback: boolean): boolean {
   const v = process.env[name];
   if (v === undefined) return fallback;
   return /^(1|true|yes|on)$/i.test(v.trim());
 }
 
-function parseSize(raw: string): { width: number; height: number } {
+function parseSize(raw: string, multiple: number, fallback: number): { width: number; height: number } {
   const m = raw.match(/^(\d+)\s*[x×]\s*(\d+)$/i);
-  if (!m) return { width: 1024, height: 1024 };
-  // FLUX wants multiples of 16
-  const round16 = (n: number) => Math.max(256, Math.round(n / 16) * 16);
-  return { width: round16(Number(m[1])), height: round16(Number(m[2])) };
+  const snap = (n: number) => Math.max(multiple * 4, Math.round(n / multiple) * multiple);
+  if (!m) return { width: fallback, height: fallback };
+  return { width: snap(Number(m[1])), height: snap(Number(m[2])) };
 }
 
 export const config = {
@@ -49,13 +43,22 @@ export const config = {
   },
 
   image: {
-    size: parseSize(str("IMAGE_SIZE", "1024x1024")),
+    // FLUX wants multiples of 16
+    size: parseSize(str("IMAGE_SIZE", "1024x1024"), 16, 1024),
   },
 
-  frames: {
-    denoise: float("FRAME_DENOISE", 0.65),
-    countDefault: int("FRAME_COUNT_DEFAULT", 8),
-    fps: 12, // legacy duration→count mapping only
+  // Animation frames come from a local ComfyUI image-to-video workflow.
+  // Default: Stable Video Diffusion (single checkpoint, stable node graph).
+  // Point COMFYUI_VIDEO_WORKFLOW at an exported API-format workflow to use
+  // LTX-Video / Wan2.1 / CogVideoX / etc. instead — see server/workflows/.
+  video: {
+    model: str("COMFYUI_VIDEO_MODEL", "svd_xt.safetensors"),
+    workflowPath: process.env.COMFYUI_VIDEO_WORKFLOW?.trim() || null,
+    frames: int("VIDEO_FRAMES", 25),
+    motion: int("VIDEO_MOTION", 127), // SVD motion_bucket_id: 1–255, higher = more motion
+    steps: int("VIDEO_STEPS", 20),
+    // SVD wants multiples of 64
+    size: parseSize(str("VIDEO_SIZE", "768x768"), 64, 768),
   },
 
   features: {

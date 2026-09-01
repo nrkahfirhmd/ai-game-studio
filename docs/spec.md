@@ -1,12 +1,23 @@
 # Spec: Replace OpenRouter with Fully Local AI
 
-**Status:** Draft for review — open decisions resolved (§14)
+**Status:** Implemented. See git history + `AGENTS.md` "Local Mode" for the shipped design.
 **Goal:** Run AI Game Studio end-to-end on a developer machine with no OpenRouter key, no cloud AI API, no per-request cost.
 
 - **Text / LLM** → Ollama (`qwen3:8b`, configurable)
-- **Image + frames** → ComfyUI running FLUX.1 Schnell (configurable)
+- **Reference sprite** → ComfyUI, FLUX.1 Schnell text2img (configurable)
+- **Movement frames** → ComfyUI **image-to-video** (Stable Video Diffusion by default, or any exported workflow via `COMFYUI_VIDEO_WORKFLOW`), then ffmpeg chroma-key per frame
 
 Preserve the existing three-column "Sprite Sheet Builder" UX and generation workflow. Keep all provider-specific code behind a service layer.
+
+> **Amendment (post-review):** §2 Gap B originally proposed N independent FLUX img2img
+> passes for frames. That was implemented, then rejected — a text-to-image model has no
+> animation priors, so the frames don't form a coherent cycle at any denoise. Replaced
+> with a real local image-to-video workflow in ComfyUI (`server/ai/comfyui.ts`
+> `generateVideoFrames`, `AIProvider.generateFrames`). SVD is the built-in default;
+> `COMFYUI_VIDEO_WORKFLOW` points at an exported API-format workflow (LTX-Video, Wan2.1,
+> CogVideoX, AnimateDiff — including GGUF quants for low VRAM) with `%TOKEN%` substitution.
+> `FRAME_DENOISE` / `FRAME_COUNT_DEFAULT` / the `frameCount` request param are gone;
+> `VIDEO_*` vars replace them. See `server/workflows/README.md`.
 
 ---
 

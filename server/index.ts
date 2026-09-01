@@ -44,14 +44,18 @@ import { rm } from "node:fs/promises";
 
 const PORT = config.port;
 
-// Motion "model" dropdown: same backend as the sprite image. `defaultDuration`
-// now carries the default frame count (the field name is kept for the client).
-const VIDEO_MODELS = IMAGE_MODELS.map((m) => ({
-  id: m.id,
-  label: m.label,
-  defaultDuration: config.frames.countDefault,
-}));
-const DEFAULT_VIDEO_MODEL = DEFAULT_IMAGE_MODEL;
+// Motion "model" dropdown → the image-to-video backend. `defaultDuration` keeps
+// its client-side field name but now carries the native frame count.
+const DEFAULT_VIDEO_MODEL = config.video.workflowPath ?? config.video.model;
+const VIDEO_MODELS = [
+  {
+    id: DEFAULT_VIDEO_MODEL,
+    label: config.video.workflowPath
+      ? `Custom workflow (${path.basename(config.video.workflowPath)})`
+      : "Stable Video Diffusion (ComfyUI)",
+    defaultDuration: config.video.frames,
+  },
+];
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -225,14 +229,6 @@ app.post("/api/sprites/animate", async (req, res) => {
     const image = asImageRef(req.body?.image);
     const text = asString(req.body?.text, "text");
 
-    let frameCount = config.frames.countDefault;
-    if (typeof req.body?.frameCount === "number") {
-      frameCount = req.body.frameCount;
-    } else if (typeof req.body?.duration === "number") {
-      // legacy: seconds → frames
-      frameCount = Math.round(req.body.duration * config.frames.fps);
-    }
-
     const imageInput = await resolveImageInput(image);
 
     await wipeLatestSpritesheet();
@@ -241,14 +237,13 @@ app.post("/api/sprites/animate", async (req, res) => {
     const frameFiles = await generateFrames({
       image: imageInput,
       motionPrompt: text,
-      frameCount,
       framesDir: framesAbs,
     });
     const frames = frameFiles.map((f) => `${PROJECT_FILES.framesDir}/${f}`);
 
     const m = await updateLatest({
       motionPrompt: text,
-      motionModel: DEFAULT_IMAGE_MODEL,
+      motionModel: DEFAULT_VIDEO_MODEL,
       frames,
       selectedFrameIndices: frames.map((_, i) => i),
       spritesheet: null,

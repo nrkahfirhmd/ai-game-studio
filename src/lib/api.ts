@@ -77,12 +77,8 @@ export function generateSprite(
   return postJson("/api/sprites/generate", { prompt, model });
 }
 
-export function animateSprite(
-  image: string,
-  text: string,
-  frameCount?: number,
-): Promise<ProjectView> {
-  return postJson("/api/sprites/animate", { image, text, frameCount });
+export function animateSprite(image: string, text: string): Promise<ProjectView> {
+  return postJson("/api/sprites/animate", { image, text });
 }
 
 export function enhancePrompt(

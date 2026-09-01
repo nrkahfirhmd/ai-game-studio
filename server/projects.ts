@@ -46,7 +46,7 @@ export function emptyManifest(name = "latest"): ProjectManifest {
     spritePrompt: "",
     spriteModel: config.comfyui.imageModel,
     motionPrompt: "",
-    motionModel: config.comfyui.imageModel,
+    motionModel: config.video.workflowPath ?? config.video.model,
     sprite: null,
     spriteDimensions: null,
     frames: [],

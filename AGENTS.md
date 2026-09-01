@@ -15,10 +15,10 @@ The app is implemented as a Vite + TypeScript single-page client and a small Exp
 | Concern | Backend | Default model |
 |---|---|---|
 | Text (prompt enhancer) | Ollama, OpenAI-compatible `/v1/chat/completions` | `qwen3:8b` |
-| Image (reference sprite) | ComfyUI HTTP API | `flux1-schnell-fp8.safetensors` (FLUX.1 Schnell) |
-| Frames (animation) | ComfyUI img2img, N runs from the reference sprite | same checkpoint |
+| Image (reference sprite) | ComfyUI HTTP API, FLUX.1 Schnell text2img | `flux1-schnell-fp8.safetensors` |
+| Frames (animation) | ComfyUI HTTP API, image-to-video (built-in SVD graph, or `COMFYUI_VIDEO_WORKFLOW`) | `svd_xt.safetensors` |
 
-No API key. No cloud. `ffmpeg` still required (chroma-key per frame + GIF preview).
+No API key. No cloud. `ffmpeg` still required (chroma-key per frame, clip→frames extraction, GIF preview).
 
 ### Provider layer
 
@@ -29,27 +29,32 @@ server/
 ├── config.ts            # typed env config, read once
 ├── chroma.ts            # CHROMA_HEX + directives + ffmpeg key filter (single source)
 ├── image.ts             # reference-sprite adapter → getProvider().generateImage()
-├── frames.ts            # N × generateImage() img2img + per-frame pose directive + ffmpeg key
+├── frames.ts            # getProvider().generateFrames() → chroma-key + scale each → frames/
 ├── prompt.ts            # enhancer → getProvider().generateText()
 ├── image-normalize.ts   # PNG guards + JPEG→PNG via ffmpeg
+├── workflows/           # README + token contract for custom video workflows
 └── ai/
-    ├── types.ts         # AIProvider, request/response types, typed errors
+    ├── types.ts         # AIProvider (generateText/Image/Frames), request/response types, typed errors
     ├── ollama.ts        # text backend
-    ├── comfyui.ts       # image backend (workflow graph builder, /prompt → /history → /view)
-    └── provider.ts      # factory: composes ollama (text) + comfyui (image)
+    ├── comfyui.ts       # image (FLUX text2img) + frames (SVD / custom video workflow)
+    └── provider.ts      # factory: composes ollama (text) + comfyui (image + frames)
 ```
 
 ### Environment variables
 
-`OLLAMA_BASE_URL`, `OLLAMA_TEXT_MODEL`, `COMFYUI_BASE_URL`, `COMFYUI_IMAGE_MODEL`, `IMAGE_SIZE`, `FRAME_DENOISE`, `FRAME_COUNT_DEFAULT`, `ENABLE_PROMPT_ENHANCER`, `PORT`. All models are env-configurable — no hardcoded model names in the provider. See `.env.example`.
+`OLLAMA_BASE_URL`, `OLLAMA_TEXT_MODEL`, `COMFYUI_BASE_URL`, `COMFYUI_IMAGE_MODEL`, `IMAGE_SIZE`, `COMFYUI_VIDEO_MODEL`, `COMFYUI_VIDEO_WORKFLOW`, `VIDEO_FRAMES`, `VIDEO_MOTION`, `VIDEO_STEPS`, `VIDEO_SIZE`, `COMFYUI_TIMEOUT_S`, `ENABLE_PROMPT_ENHANCER`, `PORT`. All models are env-configurable — no hardcoded model names in the provider. See `.env.example`.
 
-### ComfyUI workflow
+### ComfyUI workflows
 
-`server/ai/comfyui.ts` builds a FLUX.1 Schnell graph in ComfyUI API format (`CheckpointLoaderSimple → CLIPTextEncode ×2 → EmptyLatentImage | (LoadImage → VAEEncode) → KSampler(steps 4, cfg 1, euler/simple) → VAEDecode → SaveImage`). img2img adds `LoadImage`+`VAEEncode` and sets `KSampler.denoise = FRAME_DENOISE`. Submit to `POST /prompt`, poll `GET /history/{id}`, fetch via `GET /view`. Reference images for img2img are uploaded first via `POST /upload/image`.
+**Sprite** — `buildImageWorkflow` in `server/ai/comfyui.ts`: FLUX.1 Schnell API graph (`CheckpointLoaderSimple` or `UnetLoaderGGUF` + `DualCLIPLoader`/`VAELoader` for `.gguf` → `CLIPTextEncode ×2` → `EmptyLatentImage` → `KSampler(steps 4, cfg 1, euler/simple)` → `VAEDecode` → `SaveImage`).
+
+**Frames** — `buildSvdWorkflow` (default): `ImageOnlyCheckpointLoader` → `SVD_img2vid_Conditioning` → `VideoLinearCFGGuidance` → `KSampler` → `VAEDecode` → `SaveImage` (batch). Or, if `COMFYUI_VIDEO_WORKFLOW` is set, an exported API-format workflow with `%TOKENS%` substituted (`%IMAGE% %PROMPT% %NEG_PROMPT% %SEED% %FRAMES% %WIDTH% %HEIGHT% %MOTION% %STEPS%`) — see `server/workflows/README.md`.
+
+Both: reference image uploaded via `POST /upload/image`, then `POST /prompt` → poll `GET /history/{id}` → `GET /view`. `runWorkflow` maps "value not in list" errors to `ModelNotInstalledError`.
 
 ### Frames (replaces image-to-video)
 
-`POST /api/sprites/animate` takes `{ image, text, frameCount? }` (legacy `duration` is mapped `seconds → frames`). `server/frames.ts` generates `frameCount` stills — each an img2img pass from the reference sprite with a per-frame pose directive at an even phase percentage — then chroma-keys each with ffmpeg into `projects/latest/frames/frame-XXXXX.png`. The spritesheet + GIF pipeline downstream is unchanged. No `source.mp4`.
+`POST /api/sprites/animate` takes `{ image, text }`. `provider.generateFrames()` runs the video workflow and returns ordered raw PNG frames — either a `SaveImage` batch, or a clip (`VHS_VideoCombine` / `SaveAnimatedWEBP` / `SaveVideo`) which `comfyui.ts` splits with ffmpeg. `server/frames.ts` then chroma-keys + scales each into `projects/latest/frames/frame-XXXXX.png` (capped at 120). All frames start selected; the user trims in the grid. Spritesheet + GIF pipeline downstream is unchanged. No `source.mp4`.
 
 ### Health & errors
 
@@ -243,7 +248,7 @@ Notes:
 
 ## Motion / sequence generation
 
-> **SUPERSEDED — see "Local Mode" above.** OpenRouter image-to-video is gone. Frames are now N independent FLUX.1 Schnell img2img passes (`server/frames.ts`), each chroma-keyed with ffmpeg. No video, no `source.mp4`, no `VIDEO_MODELS` registry.
+> **SUPERSEDED — see "Local Mode" above.** OpenRouter image-to-video is replaced by a **local** ComfyUI image-to-video workflow (Stable Video Diffusion by default, or `COMFYUI_VIDEO_WORKFLOW`). `server/frames.ts` chroma-keys each returned frame with ffmpeg. No cloud, no `source.mp4` in the manifest, no `VIDEO_MODELS` registry.
 
 Two-stage flow:
 

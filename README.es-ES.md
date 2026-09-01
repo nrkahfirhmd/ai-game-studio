@@ -2,7 +2,7 @@
 
 Una aplicación web local — y el inicio de un AI Game Studio más completo — para generar activos de juegos a partir de prompts de texto. Por ahora: sprites de referencia 2D y fotogramas de animación compuestos en una spritesheet de 1×N con una vista previa animada en bucle. Los fondos se recortan automáticamente a transparencia mediante chroma-key, por lo que los fotogramas pueden insertarse directamente en un motor de juego. Los proyectos se pueden guardar y cargar por nombre.
 
-**Toda la inferencia se ejecuta localmente.** Sin OpenRouter, sin OpenAI, sin clave API, sin coste por petición. La generación de texto usa [Ollama](https://ollama.com); la generación de imágenes y fotogramas usa [ComfyUI](https://github.com/comfyanonymous/ComfyUI) con [FLUX.1 Schnell](https://huggingface.co/black-forest-labs/FLUX.1-schnell). La velocidad y la calidad dependen de tu hardware.
+**Toda la inferencia se ejecuta localmente.** Sin OpenRouter, sin OpenAI, sin clave API, sin coste por petición. El texto usa [Ollama](https://ollama.com); el sprite de referencia lo genera [FLUX.1 Schnell](https://huggingface.co/black-forest-labs/FLUX.1-schnell) y los fotogramas de movimiento un modelo local de imagen-a-video — ambos en [ComfyUI](https://github.com/comfyanonymous/ComfyUI). La velocidad y la calidad dependen de tu hardware.
 
 ![Mockup](mockup.png)
 
@@ -24,15 +24,17 @@ ollama serve
 ollama pull qwen3:8b
 ```
 
-### 2. ComfyUI (imagen)
+### 2. ComfyUI (imágenes + fotogramas de movimiento)
 
-Instala según la [documentación de ComfyUI](https://github.com/comfyanonymous/ComfyUI#installing). Descarga el checkpoint fp8 de FLUX.1 Schnell (~17 GB) en `ComfyUI/models/checkpoints/`:
+Instala según la [documentación de ComfyUI](https://github.com/comfyanonymous/ComfyUI#installing), luego descarga los modelos en `ComfyUI/models/`:
 
-```
-flux1-schnell-fp8.safetensors
-```
+**Sprite de referencia** — FLUX.1 Schnell, `checkpoints/flux1-schnell-fp8.safetensors` (~17 GB, de [Comfy-Org/flux1-schnell](https://huggingface.co/Comfy-Org/flux1-schnell)).
+¿Poca VRAM? Usa un quant GGUF — ver las notas de `COMFYUI_IMAGE_MODEL` en `.env.example`.
 
-(de [Comfy-Org/flux1-schnell](https://huggingface.co/Comfy-Org/flux1-schnell)). Luego inícialo:
+**Fotogramas de movimiento** — un modelo local de imagen-a-video. El predeterminado es Stable Video Diffusion: `checkpoints/svd_xt.safetensors` (~9 GB, de [stabilityai/stable-video-diffusion-img2vid-xt](https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt)).
+Para LTX-Video / Wan2.1 / CogVideoX (incluidos quants GGUF para poca VRAM), construye el workflow en ComfyUI y apunta `COMFYUI_VIDEO_WORKFLOW` a él — ver [`server/workflows/README.md`](server/workflows/README.md).
+
+Luego inícialo:
 
 ```bash
 python main.py        # sirve http://127.0.0.1:8188
@@ -53,7 +55,7 @@ Esto inicia Vite (frontend, :5173) y un servidor Express (backend, :8787) simult
 ## Cómo usarlo
 
 1. Escribe un prompt de sprite en la columna 1. Opcionalmente haz clic en **✨ Enhance** para ampliarlo con el LLM local → **Generate Reference Sprite**.
-2. Escribe un prompt de movimiento en la columna 2 (Enhance también disponible aquí) → **Generate Frames**. La aplicación ejecuta FLUX.1 Schnell img2img una vez por fotograma a partir del sprite de referencia y luego aplica chroma-key a cada resultado para obtener un PNG transparente.
+2. Escribe un prompt de movimiento en la columna 2 (Enhance también disponible aquí) → **Generate Frames**. La aplicación pasa el sprite de referencia a un modelo local de imagen-a-video en ComfyUI y luego aplica chroma-key a cada fotograma extraído para obtener un PNG transparente.
 3. Haz clic en los cuadros de los fotogramas para activar o desactivar cuáles incluir.
 4. **Generate Spritesheet** → compone un PNG de 1×N en el cliente y genera una vista previa GIF en bucle en el servidor.
 5. **Export PNG** para descargar la spritesheet.
@@ -70,14 +72,19 @@ Todos los modelos y valores por defecto son variables de entorno (ver `.env.exam
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Endpoint de Ollama |
 | `OLLAMA_TEXT_MODEL` | `qwen3:8b` | LLM para la mejora de prompts — cámbialo por `qwen3:14b`, `gpt-oss:20b`, etc. |
 | `COMFYUI_BASE_URL` | `http://127.0.0.1:8188` | Endpoint de ComfyUI |
-| `COMFYUI_IMAGE_MODEL` | `flux1-schnell-fp8.safetensors` | Nombre del checkpoint en `ComfyUI/models/checkpoints/` |
-| `IMAGE_SIZE` | `1024x1024` | Dimensiones del sprite de referencia (redondeadas a /16 para FLUX) |
-| `FRAME_DENOISE` | `0.65` | Fuerza de img2img para fotogramas — menor = más estable, menos movimiento |
-| `FRAME_COUNT_DEFAULT` | `8` | Fotogramas generados por cada ejecución de **Generate Frames** |
+| `COMFYUI_IMAGE_MODEL` | `flux1-schnell-fp8.safetensors` | Checkpoint del sprite (o un `.gguf` en `models/unet/`) |
+| `IMAGE_SIZE` | `1024x1024` | Dimensiones del sprite de referencia (ajustadas a /16 para FLUX) |
+| `COMFYUI_VIDEO_MODEL` | `svd_xt.safetensors` | Checkpoint imagen-a-video (SVD) del workflow integrado |
+| `COMFYUI_VIDEO_WORKFLOW` | _(sin definir)_ | Ruta a un workflow exportado en formato API — reemplaza SVD (LTX/Wan/CogVideoX/…) |
+| `VIDEO_FRAMES` | `25` | Fotogramas que produce el modelo de video |
+| `VIDEO_MOTION` | `127` | Fuerza de movimiento de SVD (1–255) |
+| `VIDEO_STEPS` | `20` | Pasos del sampler de video |
+| `VIDEO_SIZE` | `768x768` | Dimensiones de video (ajustadas a /64) |
+| `COMFYUI_TIMEOUT_S` | `600` | Límite de espera por generación |
 | `ENABLE_PROMPT_ENHANCER` | `true` | Mostrar los botones ✨ Enhance |
 | `PORT` | `8787` | Puerto de Express |
 
-No se necesita ningún cambio de código para cambiar de modelo — solo edita `.env` y reinicia.
+No se necesita ningún cambio de código para cambiar de modelo — solo edita `.env` y reinicia. Ver [`server/workflows/README.md`](server/workflows/README.md) para pipelines de video personalizados.
 
 ## Prompts de ejemplo
 
@@ -97,8 +104,9 @@ No se necesita ningún cambio de código para cambiar de modelo — solo edita `
 
 Consejos:
 - Mantén los prompts de movimiento enfocados en la acción. Frases como *"no camera movement"*, *"side-view"* y *"no head tilting"* ayudan a mantener los fotogramas listos para el juego.
-- FLUX.1 Schnell es un modelo destilado de 4 pasos — ignora CFG / prompts negativos. El fondo verde chroma se controla con el prompt positivo más la red de seguridad del chroma-key de ffmpeg.
-- Los fotogramas son imágenes img2img independientes, no video, así que espera algo de inestabilidad entre fotogramas. Baja `FRAME_DENOISE` para personajes más estables, súbelo para más movimiento.
+- FLUX.1 Schnell (sprite) es un modelo destilado de 4 pasos — ignora CFG / prompts negativos. El fondo verde chroma se controla con el prompt positivo más la red de seguridad del chroma-key de ffmpeg.
+- Los fotogramas vienen de un pase imagen-a-video. SVD da movimiento corto y sutil (bueno para idle/respiración); para locomoción (caminar/correr/atacar) usa un modelo condicionado por texto vía `COMFYUI_VIDEO_WORKFLOW` (LTX-Video, Wan2.1) para que el prompt de movimiento realmente lo dirija.
+- `VIDEO_MOTION` ajusta cuánto se mueve SVD; `VIDEO_FRAMES` fija cuántos fotogramas obtienes para recortar en la cuadrícula.
 
 ## Solución de problemas
 
@@ -107,9 +115,10 @@ Consejos:
 | `Cannot connect to Ollama` | `ollama serve`; comprueba `OLLAMA_BASE_URL`. |
 | `Text model "…" is not installed` | `ollama pull qwen3:8b` |
 | `Cannot connect to ComfyUI` | Inicia ComfyUI (`python main.py`); comprueba `COMFYUI_BASE_URL`. |
-| `checkpoint "…" not found` | Pon el archivo `.safetensors` en `ComfyUI/models/checkpoints/` y reinicia ComfyUI. |
-| Sin memoria | Modelo de texto más pequeño (`qwen3:4b`); un checkpoint FLUX GGUF Q4; baja `IMAGE_SIZE`. |
-| Generación lenta | Aceleración por GPU para ComfyUI; menos fotogramas (`FRAME_COUNT_DEFAULT`); `IMAGE_SIZE` más pequeño. |
+| `checkpoint "…" not found` / `model "…" is not installed` | Pon el archivo en la carpeta correcta de `ComfyUI/models/` y reinicia ComfyUI. Para video con poca VRAM, usa `COMFYUI_VIDEO_WORKFLOW` con un workflow GGUF de LTX/Wan. |
+| `ComfyUI did not finish … in time` | Sube `COMFYUI_TIMEOUT_S`. |
+| Sin memoria | Modelo de texto más pequeño (`qwen3:4b`); FLUX GGUF Q4; workflow de video GGUF; baja `IMAGE_SIZE` / `VIDEO_SIZE` / `VIDEO_FRAMES`. |
+| Generación lenta | Aceleración por GPU para ComfyUI; baja `VIDEO_FRAMES` / `VIDEO_STEPS`; tamaños más pequeños. |
 
 ## TO-DO
 
