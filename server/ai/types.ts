@@ -44,8 +44,10 @@ export interface ProviderHealth {
 }
 
 export interface FramesRequest {
-  /** data: URL of the reference sprite */
+  /** data: URL of the reference sprite (start / first frame) */
   image: string;
+  /** data: URL of the end-pose sprite (last frame) — two-keyframe mode */
+  endImage?: string;
   /** motion prompt (+ any directives) — used by text-conditioned video models */
   prompt: string;
   seed?: number;

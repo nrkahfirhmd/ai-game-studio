@@ -26,7 +26,8 @@ All frames are then chroma-keyed (`#00b140` → transparent) and scaled, same as
 
 | Token | Replaced with | Typical node input |
 |---|---|---|
-| `%IMAGE%` | uploaded reference filename (string) | `LoadImage.image` |
+| `%IMAGE%` | uploaded reference sprite filename (string) | `LoadImage.image` — start frame |
+| `%IMAGE_END%` | generated end-pose sprite filename (string); = `%IMAGE%` when two-keyframe is off | `LoadImage.image` — end frame |
 | `%PROMPT%` | motion prompt + chroma directive (string) | positive `CLIPTextEncode.text` |
 | `%NEG_PROMPT%` | a generic negative (string) | negative `CLIPTextEncode.text` |
 | `%SEED%` | random int | sampler `seed` / `noise_seed` |
@@ -34,17 +35,42 @@ All frames are then chroma-keyed (`#00b140` → transparent) and scaled, same as
 | `%WIDTH%` | `VIDEO_SIZE` width (number) | `width` |
 | `%HEIGHT%` | `VIDEO_SIZE` height (number) | `height` |
 | `%MOTION%` | `VIDEO_MOTION` (number) | SVD `motion_bucket_id`, LTX `frame_rate`, etc. |
+| `%STRENGTH%` | `VIDEO_STRENGTH` (number) | LTX `LTXVImgToVideo.strength` (single-image only) |
 | `%STEPS%` | `VIDEO_STEPS` (number) | sampler `steps` |
 
 A value that is *exactly* a token (`"seed": "%SEED%"`) is replaced with the raw
 number. A token inside a longer string (`"text": "side view, %PROMPT%"`) is
 string-substituted. Unused tokens are harmless.
 
-## Example skeleton (LTX-Video 2B I2V)
+## Shipped examples
 
-This matches the ComfyUI **LTXV Image to Video** template (2024–2025). If node
-names differ in your version, load that template, tokenize it, and re-export —
-don't hand-edit this.
+| File | Mode | Use for |
+|---|---|---|
+| [`ltxv-i2v.json`](ltxv-i2v.json) | single image (`%IMAGE%`) | idle, breathing, sway |
+| [`ltxv-keyframes.json`](ltxv-keyframes.json) | two keyframes (`%IMAGE%` + `%IMAGE_END%`) | attack, jump, walk — directed motion |
+
+Both load the T5 encoder (`t5xxl_fp8_e4m3fn.safetensors`) via `CLIPLoader` — the
+ComfyUI template dropdown often defaults to `clip_l`, which is wrong for LTXV.
+
+**Two-keyframe** also needs `VIDEO_ENDPOSE_DENOISE > 0` in `.env`: the app then
+generates an end-pose sprite with FLUX (img2img from the reference, prompted with
+the motion) and the video model interpolates between the two. A single still can
+only produce idle/sway motion — the model has no way to reach a specific pose.
+
+### The end-pose is the weak link
+
+**FLUX Schnell (the default sprite model) can't do a big pose change without also
+changing the character.** Low denoise → same pose; high denoise → new person.
+For crisp attacks/jumps, set `COMFYUI_ENDPOSE_WORKFLOW` to an exported img2img
+workflow using a stronger model — **FLUX Dev** (real prompt + img2img adherence)
+or an **SDXL + OpenPose ControlNet** rig (forces the skeleton, keeps identity).
+Tokens: `%IMAGE%` `%PROMPT%` `%SEED%` `%WIDTH%` `%HEIGHT%` `%DENOISE%`. Final node
+must be `SaveImage`.
+
+## Skeleton (older KSampler-style — adapt to your version)
+
+If node names differ in your ComfyUI, load its **LTXV Image to Video** template,
+tokenize it, and re-export — don't hand-edit this.
 
 ```json
 {

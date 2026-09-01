@@ -136,18 +136,27 @@ token contract and a reference skeleton.
 
 ## 6. Point the app at it
 
-Edit `.env`:
+Two workflows ship ready to use — no export needed unless your ComfyUI node names
+differ:
+
+- `server/workflows/ltxv-i2v.json` — single image. Idle / breathing / sway only.
+- `server/workflows/ltxv-keyframes.json` — **two-keyframe**. FLUX generates an
+  end-pose sprite, LTX interpolates start → end. Needed for attack / jump / walk.
+
+For directed motion, use the keyframe one:
 
 ```bash
-COMFYUI_VIDEO_WORKFLOW=server/workflows/ltxv-i2v.json
-VIDEO_SIZE=768x512
-VIDEO_FRAMES=25
+COMFYUI_VIDEO_WORKFLOW=server/workflows/ltxv-keyframes.json
+VIDEO_ENDPOSE_DENOISE=0.7      # >0 turns on the end-pose step; 0.6–0.8 is the range
+VIDEO_SIZE=512x512             # match the sprite aspect or LTX crops the legs
+VIDEO_FRAMES=25                # 8n+1
 VIDEO_STEPS=25
 COMFYUI_TIMEOUT_S=600
 ```
 
-`VIDEO_SIZE` must be multiples of 32; `VIDEO_FRAMES` should be `8n+1` (17, 25, 41…).
-Keep `IMAGE_SIZE=1024x1024` for the sprite — the video step resizes.
+Both ship checkpoint names `ltxv-2b-0.9.6-dev-04-25.safetensors` +
+`t5xxl_fp8_e4m3fn.safetensors`. If yours differ, edit the JSON or export your own
+(steps 4–5 above) — see [`../server/workflows/README.md`](../server/workflows/README.md).
 
 ---
 

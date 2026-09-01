@@ -190,20 +190,25 @@ export async function generateImage(
   const width = req.width ?? config.image.size.width;
   const height = req.height ?? config.image.size.height;
   const seed = req.seed ?? randomInt(1, 2 ** 31);
+  const denoise = req.denoise ?? 0.65;
   const inputImageName = req.image ? await uploadImage(req.image) : undefined;
 
-  const entry = await runWorkflow(
-    buildImageWorkflow({
-      positive: req.prompt,
-      width,
-      height,
-      seed,
-      denoise: req.denoise ?? 0.65,
-      inputImageName,
-    }),
-    imageModel,
-    "image",
-  );
+  // img2img + a custom end-pose workflow configured → use it (stronger model /
+  // ControlNet). Otherwise the built-in FLUX graph.
+  const endPoseWf = config.video.endPoseWorkflowPath;
+  const graph =
+    inputImageName && endPoseWf
+      ? (substituteTokens(await loadCustomWorkflow(endPoseWf), {
+          "%IMAGE%": inputImageName,
+          "%PROMPT%": req.prompt,
+          "%SEED%": seed,
+          "%WIDTH%": width,
+          "%HEIGHT%": height,
+          "%DENOISE%": denoise,
+        }) as Record<string, unknown>)
+      : buildImageWorkflow({ positive: req.prompt, width, height, seed, denoise, inputImageName });
+
+  const entry = await runWorkflow(graph, imageModel, "image");
 
   const files = Object.values(entry.outputs ?? {}).flatMap((o) => o.images ?? []);
   const file = files.find((f) => f.type !== "temp") ?? files[0];
@@ -217,31 +222,38 @@ export async function generateImage(
 
 // ---- frames: image-to-video ----
 
-const VIDEO_TOKENS = (name: string, prompt: string, seed: number) => ({
+const VIDEO_TOKENS = (name: string, prompt: string, seed: number, endName?: string) => ({
   "%IMAGE%": name,
+  "%IMAGE_END%": endName ?? name, // falls back to the start frame if no end pose
   "%PROMPT%": prompt,
-  "%NEG_PROMPT%": "static, still, frozen, watermark, text, blurry",
+  "%NEG_PROMPT%":
+    "camera movement, zoom, pan, dolly, cropping, background change, " +
+    "scene change, blurry, smeared, melting, deformed, static, frozen, watermark, text",
   "%SEED%": seed,
   "%FRAMES%": config.video.frames,
   "%WIDTH%": config.video.size.width,
   "%HEIGHT%": config.video.size.height,
   "%MOTION%": config.video.motion,
+  "%STRENGTH%": config.video.strength,
+  "%END_STRENGTH%": config.video.endGuideStrength,
   "%STEPS%": config.video.steps,
 });
 
-let cachedCustomWorkflow: string | null = null;
+const workflowCache = new Map<string, string>();
 async function loadCustomWorkflow(p: string): Promise<Record<string, unknown>> {
-  if (cachedCustomWorkflow === null) {
+  let raw = workflowCache.get(p);
+  if (raw === undefined) {
     const abs = path.isAbsolute(p) ? p : path.join(ROOT_DIR, p);
     try {
-      cachedCustomWorkflow = await readFile(abs, "utf8");
+      raw = await readFile(abs, "utf8");
     } catch {
       throw new GenerationError(
-        `COMFYUI_VIDEO_WORKFLOW file not found: ${p} (export an API-format workflow from ComfyUI)`,
+        `workflow file not found: ${p} (export an API-format workflow from ComfyUI)`,
       );
     }
+    workflowCache.set(p, raw);
   }
-  return JSON.parse(cachedCustomWorkflow) as Record<string, unknown>;
+  return JSON.parse(raw) as Record<string, unknown>;
 }
 
 /** Replace %TOKENS% throughout a workflow graph. A lone token becomes its raw
@@ -331,18 +343,20 @@ async function extractClipFrames(buffer: Buffer, ext: string): Promise<string[]>
 
 /** Run the image-to-video workflow, return ordered frame PNGs (base64, pre chroma-key). */
 export async function generateVideoFrames(opts: {
-  image: string; // data URL
+  image: string; // data URL, start frame
+  endImage?: string; // data URL, end frame (two-keyframe mode)
   prompt: string;
   seed?: number;
 }): Promise<string[]> {
   const seed = opts.seed ?? randomInt(1, 2 ** 31);
   const imageName = await uploadImage(opts.image);
+  const endName = opts.endImage ? await uploadImage(opts.endImage) : undefined;
 
   const custom = config.video.workflowPath;
   const graph = custom
     ? (substituteTokens(
         await loadCustomWorkflow(custom),
-        VIDEO_TOKENS(imageName, opts.prompt, seed),
+        VIDEO_TOKENS(imageName, opts.prompt, seed, endName),
       ) as Record<string, unknown>)
     : buildSvdWorkflow(imageName, seed);
 

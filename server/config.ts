@@ -10,6 +10,11 @@ function int(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function float(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function bool(name: string, fallback: boolean): boolean {
   const v = process.env[name];
   if (v === undefined) return fallback;
@@ -57,8 +62,23 @@ export const config = {
     frames: int("VIDEO_FRAMES", 25),
     motion: int("VIDEO_MOTION", 127), // SVD motion_bucket_id: 1–255, higher = more motion
     steps: int("VIDEO_STEPS", 20),
+    // img2vid faithfulness to the input sprite (LTX-Video). Higher = keeps the
+    // character + background, less camera drift; lower = more (often wrong) motion.
+    strength: float("VIDEO_STRENGTH", 0.85),
     // SVD wants multiples of 64
     size: parseSize(str("VIDEO_SIZE", "768x768"), 64, 768),
+    // Two-keyframe mode: FLUX img2img denoise for the generated end-pose sprite.
+    // Higher = more pose change (less character consistency). 0 disables the
+    // end-pose step (single-image I2V only).
+    endPoseDenoise: float("VIDEO_ENDPOSE_DENOISE", 0),
+    // How hard the video model pins the end-pose frame (LTXVAddGuide strength).
+    // 1.0 = exact; lower lets it blend the start character back in.
+    endGuideStrength: float("VIDEO_END_STRENGTH", 0.7),
+    // Optional: exported img2img workflow for the end-pose sprite (tokens:
+    // %IMAGE% %PROMPT% %SEED% %WIDTH% %HEIGHT% %DENOISE%). Use this for a
+    // stronger model (FLUX Dev) or a ControlNet pose rig — FLUX Schnell can't
+    // do a big pose change without also swapping the character.
+    endPoseWorkflowPath: process.env.COMFYUI_ENDPOSE_WORKFLOW?.trim() || null,
   },
 
   features: {
