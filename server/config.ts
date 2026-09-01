@@ -40,6 +40,12 @@ export const config = {
   comfyui: {
     baseUrl: str("COMFYUI_BASE_URL", "http://127.0.0.1:8188").replace(/\/+$/, ""),
     imageModel: str("COMFYUI_IMAGE_MODEL", "flux1-schnell-fp8.safetensors"),
+    // Only used when COMFYUI_IMAGE_MODEL ends in .gguf (split model files).
+    t5Model: str("COMFYUI_T5_MODEL", "t5xxl_fp8_e4m3fn.safetensors"),
+    clipModel: str("COMFYUI_CLIP_MODEL", "clip_l.safetensors"),
+    vaeModel: str("COMFYUI_VAE_MODEL", "ae.safetensors"),
+    // Per-image wait cap. Local GGUF on modest hardware can take many minutes.
+    timeoutMs: int("COMFYUI_TIMEOUT_S", 600) * 1000,
   },
 
   image: {

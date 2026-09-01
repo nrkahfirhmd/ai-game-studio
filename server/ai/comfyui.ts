@@ -18,8 +18,8 @@ import {
 const { baseUrl, imageModel } = config.comfyui;
 const CLIENT_ID = "ai-game-studio";
 
-const POLL_INTERVAL_MS = 750;
-const POLL_MAX_ATTEMPTS = 200; // ~2.5 min
+const POLL_INTERVAL_MS = 1500;
+const POLL_MAX_ATTEMPTS = Math.ceil(config.comfyui.timeoutMs / POLL_INTERVAL_MS);
 
 const UNAVAILABLE_HINT =
   "Start ComfyUI (python main.py) and check COMFYUI_BASE_URL.";
@@ -66,18 +66,22 @@ function buildWorkflow(opts: {
   denoise: number;
   inputImageName?: string;
 }): Record<string, unknown> {
+  // fp8 checkpoint bundles UNet+CLIP+VAE; .gguf needs them loaded separately.
+  const isGguf = /\.gguf$/i.test(imageModel);
+  const clipRef = isGguf ? ["1c", 0] : ["1", 1];
+  const vaeRef = isGguf ? ["1v", 0] : ["1", 2];
+
   const g: Record<string, unknown> = {
-    "1": {
-      class_type: "CheckpointLoaderSimple",
-      inputs: { ckpt_name: imageModel },
-    },
+    "1": isGguf
+      ? { class_type: "UnetLoaderGGUF", inputs: { unet_name: imageModel } }
+      : { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: imageModel } },
     "2": {
       class_type: "CLIPTextEncode",
-      inputs: { text: opts.positive, clip: ["1", 1] },
+      inputs: { text: opts.positive, clip: clipRef },
     },
     "3": {
       class_type: "CLIPTextEncode",
-      inputs: { text: "", clip: ["1", 1] },
+      inputs: { text: "", clip: clipRef },
     },
     "5": {
       class_type: "KSampler",
@@ -96,7 +100,7 @@ function buildWorkflow(opts: {
     },
     "6": {
       class_type: "VAEDecode",
-      inputs: { samples: ["5", 0], vae: ["1", 2] },
+      inputs: { samples: ["5", 0], vae: vaeRef },
     },
     "7": {
       class_type: "SaveImage",
@@ -104,9 +108,21 @@ function buildWorkflow(opts: {
     },
   };
 
+  if (isGguf) {
+    g["1c"] = {
+      class_type: "DualCLIPLoader",
+      inputs: {
+        clip_name1: config.comfyui.t5Model,
+        clip_name2: config.comfyui.clipModel,
+        type: "flux",
+      },
+    };
+    g["1v"] = { class_type: "VAELoader", inputs: { vae_name: config.comfyui.vaeModel } };
+  }
+
   if (opts.inputImageName) {
     g["4a"] = { class_type: "LoadImage", inputs: { image: opts.inputImageName } };
-    g["4b"] = { class_type: "VAEEncode", inputs: { pixels: ["4a", 0], vae: ["1", 2] } };
+    g["4b"] = { class_type: "VAEEncode", inputs: { pixels: ["4a", 0], vae: vaeRef } };
   } else {
     g["4"] = {
       class_type: "EmptyLatentImage",
@@ -158,7 +174,7 @@ export async function generateImage(
 
   if (!submitRes.ok || !submitJson.prompt_id) {
     const errMsg = submitJson.error?.message ?? `HTTP ${submitRes.status}`;
-    if (/ckpt_name|checkpoint|value not in list/i.test(JSON.stringify(submitJson))) {
+    if (/ckpt_name|unet_name|checkpoint|value not in list/i.test(JSON.stringify(submitJson))) {
       throw new ModelNotInstalledError("ComfyUI", imageModel, MODEL_HINT);
     }
     throw new GenerationError(`ComfyUI rejected the workflow: ${errMsg}`);
@@ -229,13 +245,16 @@ export async function health(): Promise<BackendHealth> {
   if (!statsRes.ok) return { ...base, reachable: true };
 
   try {
-    const infoRes = await fetch(`${baseUrl}/object_info/CheckpointLoaderSimple`);
+    const isGguf = /\.gguf$/i.test(imageModel);
+    const node = isGguf ? "UnetLoaderGGUF" : "CheckpointLoaderSimple";
+    const field = isGguf ? "unet_name" : "ckpt_name";
+    const infoRes = await fetch(`${baseUrl}/object_info/${node}`);
     if (!infoRes.ok) return { ...base, reachable: true };
     const info = (await infoRes.json()) as Record<
       string,
-      { input?: { required?: { ckpt_name?: unknown[][] } } }
+      { input?: { required?: Record<string, unknown[][]> } }
     >;
-    const list = info.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0];
+    const list = info[node]?.input?.required?.[field]?.[0];
     const installed = Array.isArray(list) && list.includes(imageModel);
     return { ...base, reachable: true, installed };
   } catch {
