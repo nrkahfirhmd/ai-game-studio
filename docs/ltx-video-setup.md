@@ -71,7 +71,7 @@ Restart ComfyUI so it picks up the new files.
    (or grab the JSON from the [ComfyUI LTXV docs](https://docs.comfy.org/tutorials/video/ltxv)
    and drag it onto the canvas).
 3. In the loaded graph:
-   - Checkpoint loader → `ltx-video-2b-v0.9.6.safetensors`
+   - Checkpoint loader → `ltxv-2b-0.9.6-dev-04-25.safetensors`
    - CLIP loader → `t5xxl_fp8_e4m3fn.safetensors`, type `ltxv`
    - `LoadImage` → upload any test sprite PNG (green background is fine)
    - Positive prompt → e.g. `side view, character walking, walk cycle, no camera movement`

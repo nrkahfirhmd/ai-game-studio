@@ -48,7 +48,7 @@ don't hand-edit this.
 
 ```json
 {
-  "1":  { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "ltx-video-2b-v0.9.6.safetensors" } },
+  "1":  { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "ltxv-2b-0.9.6-dev-04-25.safetensors" } },
   "2":  { "class_type": "CLIPLoader", "inputs": { "clip_name": "t5xxl_fp8_e4m3fn.safetensors", "type": "ltxv" } },
   "3":  { "class_type": "LoadImage", "inputs": { "image": "%IMAGE%" } },
   "4":  { "class_type": "CLIPTextEncode", "inputs": { "text": "%PROMPT%", "clip": ["2", 0] } },
