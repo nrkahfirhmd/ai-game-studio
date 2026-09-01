@@ -2,9 +2,11 @@ import {
   animateSprite,
   checkHealth,
   deleteProject,
+  enhancePrompt,
   generateSprite,
   getCurrentProject,
   getImageModels,
+  getServerConfig,
   getVideoModels,
   listProjects,
   loadProject,
@@ -38,6 +40,8 @@ export function mountApp(root: HTMLElement) {
 
   // ---- Refs ----
   const promptInput = root.querySelector<HTMLTextAreaElement>("#sprite-prompt")!;
+  const enhanceSpriteBtn = root.querySelector<HTMLButtonElement>("#btn-enhance-sprite")!;
+  const enhanceMotionBtn = root.querySelector<HTMLButtonElement>("#btn-enhance-motion")!;
   const spriteModelSelect = root.querySelector<HTMLSelectElement>("#sprite-model")!;
   const generateSpriteBtn = root.querySelector<HTMLButtonElement>("#btn-generate-sprite")!;
   const spritePreview = root.querySelector<HTMLDivElement>("#sprite-preview")!;
@@ -78,6 +82,38 @@ export function mountApp(root: HTMLElement) {
   motionModelSelect.addEventListener("change", () => {
     store.set({ motionModel: motionModelSelect.value });
   });
+
+  async function runEnhance(
+    kind: "sprite" | "motion",
+    input: HTMLTextAreaElement,
+    btn: HTMLButtonElement,
+    statusEl: HTMLElement,
+  ) {
+    const current = input.value.trim();
+    if (!current) {
+      setStatus(statusEl, `Type a ${kind === "sprite" ? "sprite" : "movement"} prompt to enhance.`, "error");
+      return;
+    }
+    btn.disabled = true;
+    setStatus(statusEl, `${spinner()}Enhancing prompt…`);
+    try {
+      const { enhanced } = await enhancePrompt(kind, current);
+      input.value = enhanced;
+      store.set(kind === "sprite" ? { spritePrompt: enhanced } : { motionPrompt: enhanced });
+      setStatus(statusEl, "Prompt enhanced — edit freely before generating.", "success");
+    } catch (err) {
+      setStatus(statusEl, err instanceof Error ? err.message : "Enhance failed", "error");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  enhanceSpriteBtn.addEventListener("click", () =>
+    runEnhance("sprite", promptInput, enhanceSpriteBtn, spriteStatus),
+  );
+  enhanceMotionBtn.addEventListener("click", () =>
+    runEnhance("motion", motionInput, enhanceMotionBtn, framesStatus),
+  );
 
   generateSpriteBtn.addEventListener("click", async () => {
     const prompt = store.get().spritePrompt.trim();
@@ -124,7 +160,7 @@ export function mountApp(root: HTMLElement) {
     store.set({ status: "generating-video", errorMessage: null });
     setStatus(framesStatus, `${spinner()}Generating motion video…`);
     try {
-      const view = await animateSprite(state.spriteSrc, text, state.motionModel);
+      const view = await animateSprite(state.spriteSrc, text);
       const v = view.updatedAt;
       store.set({
         status: "done",
@@ -436,15 +472,39 @@ export function mountApp(root: HTMLElement) {
     listProjects(),
     getImageModels(),
     getVideoModels(),
+    getServerConfig(),
   ])
-    .then(([health, view, projects, imageModelsResp, videoModelsResp]) => {
-      if (!health.hasApiKey) {
+    .then(([health, view, projects, imageModelsResp, videoModelsResp, serverConfig]) => {
+      const enhancerOn = serverConfig.promptEnhancer && health.text?.reachable === true;
+      enhanceSpriteBtn.hidden = !enhancerOn;
+      enhanceMotionBtn.hidden = !enhancerOn;
+
+      if (health.image && !health.image.reachable) {
         setStatus(
           spriteStatus,
-          "OPENROUTER_API_KEY is missing on the server. Add it to .env and restart.",
+          `ComfyUI is not reachable at ${health.image.baseUrl}. Start it (python main.py) to generate images.`,
+          "error",
+        );
+      } else if (health.image && !health.image.installed) {
+        setStatus(
+          spriteStatus,
+          `ComfyUI checkpoint "${health.image.model}" not found. Put it in ComfyUI/models/checkpoints/ and restart ComfyUI.`,
+          "error",
+        );
+      } else if (serverConfig.promptEnhancer && health.text && !health.text.reachable) {
+        setStatus(
+          spriteStatus,
+          `Ollama is not reachable at ${health.text.baseUrl} — prompt enhancer disabled. Run: ollama serve`,
+          "error",
+        );
+      } else if (serverConfig.promptEnhancer && health.text && !health.text.installed) {
+        setStatus(
+          spriteStatus,
+          `Ollama model "${health.text.model}" is not installed. Run: ollama pull ${health.text.model}`,
           "error",
         );
       }
+
       store.set({
         savedProjects: projects,
         imageModels: [...imageModelsResp.models],
@@ -572,6 +632,10 @@ function renderShell(): string {
                 placeholder="Describe the character or object…"
                 rows="3"
               ></textarea>
+              <button id="btn-enhance-sprite" class="btn-enhance" type="button" hidden>
+                ${sparkleIcon}
+                Enhance
+              </button>
             </div>
             <div class="field">
               <label class="field__label" for="sprite-model">Model</label>
@@ -601,6 +665,10 @@ function renderShell(): string {
                 placeholder="e.g., walking left, jump, attack right…"
                 rows="3"
               ></textarea>
+              <button id="btn-enhance-motion" class="btn-enhance" type="button" hidden>
+                ${sparkleIcon}
+                Enhance
+              </button>
             </div>
             <div class="motion-controls">
               <div class="field motion-controls__model">

@@ -80,9 +80,16 @@ export function generateSprite(
 export function animateSprite(
   image: string,
   text: string,
-  model?: string,
+  frameCount?: number,
 ): Promise<ProjectView> {
-  return postJson("/api/sprites/animate", { image, text, model });
+  return postJson("/api/sprites/animate", { image, text, frameCount });
+}
+
+export function enhancePrompt(
+  kind: "sprite" | "motion",
+  prompt: string,
+): Promise<{ enhanced: string }> {
+  return postJson("/api/prompt/enhance", { kind, prompt });
 }
 
 export function getVideoModels(): Promise<VideoModelsResponse> {
@@ -125,7 +132,25 @@ export function saveSpritesheet(dataUrl: string): Promise<ProjectView> {
   return postJson("/api/projects/spritesheet", { dataUrl });
 }
 
-export async function checkHealth(): Promise<{ ok: boolean; hasApiKey: boolean }> {
+export interface BackendHealth {
+  backend: string;
+  baseUrl: string;
+  reachable: boolean;
+  model: string;
+  installed: boolean;
+}
+
+export interface HealthResponse {
+  ok: boolean;
+  text?: BackendHealth;
+  image?: BackendHealth;
+}
+
+export async function checkHealth(): Promise<HealthResponse> {
   const res = await fetch("/api/health");
   return res.json();
+}
+
+export async function getServerConfig(): Promise<{ promptEnhancer: boolean }> {
+  return getJson("/api/config");
 }

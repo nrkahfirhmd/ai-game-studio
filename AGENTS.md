@@ -4,7 +4,62 @@
 
 A lightweight web app — and the seed of a larger AI Game Studio — for generating 2D game assets from text prompts. Today: reference sprites and animation frames composed into a 1×N spritesheet with a looping animated preview. The app uses [OpenRouter](https://openrouter.ai) as the single boundary to the model providers, which gives access to 300+ image / video / audio / text models behind one API key. New asset types (backgrounds, tilemaps, SFX, music, voice) plug into the same pattern.
 
-The app is implemented as a Vite + TypeScript single-page client and a small Express server (run concurrently in dev via `tsx watch`). Keep the UI lightweight and avoid heavy UI libraries. The server makes raw `fetch` calls to OpenRouter — no provider SDKs.
+The app is implemented as a Vite + TypeScript single-page client and a small Express server (run concurrently in dev via `tsx watch`). Keep the UI lightweight and avoid heavy UI libraries. The server makes raw `fetch` calls to the local AI backends — no provider SDKs.
+
+## Local Mode (current)
+
+**The app runs fully locally. OpenRouter has been removed.** The sections further down that describe OpenRouter (`## Initial sprite image generation`, `## Motion / sequence generation`) are **superseded** — retained only as history. See [docs/spec.md](docs/spec.md) for the migration spec.
+
+### Backends
+
+| Concern | Backend | Default model |
+|---|---|---|
+| Text (prompt enhancer) | Ollama, OpenAI-compatible `/v1/chat/completions` | `qwen3:8b` |
+| Image (reference sprite) | ComfyUI HTTP API | `flux1-schnell-fp8.safetensors` (FLUX.1 Schnell) |
+| Frames (animation) | ComfyUI img2img, N runs from the reference sprite | same checkpoint |
+
+No API key. No cloud. `ffmpeg` still required (chroma-key per frame + GIF preview).
+
+### Provider layer
+
+All backend-specific code lives under `server/ai/`. Application code depends only on the `AIProvider` interface.
+
+```
+server/
+├── config.ts            # typed env config, read once
+├── chroma.ts            # CHROMA_HEX + directives + ffmpeg key filter (single source)
+├── image.ts             # reference-sprite adapter → getProvider().generateImage()
+├── frames.ts            # N × generateImage() img2img + per-frame pose directive + ffmpeg key
+├── prompt.ts            # enhancer → getProvider().generateText()
+├── image-normalize.ts   # PNG guards + JPEG→PNG via ffmpeg
+└── ai/
+    ├── types.ts         # AIProvider, request/response types, typed errors
+    ├── ollama.ts        # text backend
+    ├── comfyui.ts       # image backend (workflow graph builder, /prompt → /history → /view)
+    └── provider.ts      # factory: composes ollama (text) + comfyui (image)
+```
+
+### Environment variables
+
+`OLLAMA_BASE_URL`, `OLLAMA_TEXT_MODEL`, `COMFYUI_BASE_URL`, `COMFYUI_IMAGE_MODEL`, `IMAGE_SIZE`, `FRAME_DENOISE`, `FRAME_COUNT_DEFAULT`, `ENABLE_PROMPT_ENHANCER`, `PORT`. All models are env-configurable — no hardcoded model names in the provider. See `.env.example`.
+
+### ComfyUI workflow
+
+`server/ai/comfyui.ts` builds a FLUX.1 Schnell graph in ComfyUI API format (`CheckpointLoaderSimple → CLIPTextEncode ×2 → EmptyLatentImage | (LoadImage → VAEEncode) → KSampler(steps 4, cfg 1, euler/simple) → VAEDecode → SaveImage`). img2img adds `LoadImage`+`VAEEncode` and sets `KSampler.denoise = FRAME_DENOISE`. Submit to `POST /prompt`, poll `GET /history/{id}`, fetch via `GET /view`. Reference images for img2img are uploaded first via `POST /upload/image`.
+
+### Frames (replaces image-to-video)
+
+`POST /api/sprites/animate` takes `{ image, text, frameCount? }` (legacy `duration` is mapped `seconds → frames`). `server/frames.ts` generates `frameCount` stills — each an img2img pass from the reference sprite with a per-frame pose directive at an even phase percentage — then chroma-keys each with ffmpeg into `projects/latest/frames/frame-XXXXX.png`. The spritesheet + GIF pipeline downstream is unchanged. No `source.mp4`.
+
+### Health & errors
+
+`GET /api/health` → `{ ok, text: BackendHealth, image: BackendHealth }` where `BackendHealth = { backend, baseUrl, reachable, model, installed }`. Boot logs actionable warnings but never crashes. Typed errors map to HTTP status: `BackendUnavailableError → 503`, `ModelNotInstalledError → 422`, `GenerationError → 502`.
+
+`GET /api/models/image` and `GET /api/models/video` both return the single ComfyUI checkpoint (the motion "Model" dropdown is cosmetic — same backend). `GET /api/config` → `{ promptEnhancer }`. `POST /api/prompt/enhance { kind: "sprite"|"motion", prompt }` → `{ enhanced }`.
+
+### Chroma sync points
+
+`CHROMA_HEX` / directives / ffmpeg filter are all in `server/chroma.ts` now — one file, not three.
 
 ## Non-negotiable requirements
 
@@ -17,6 +72,8 @@ The app is implemented as a Vite + TypeScript single-page client and a small Exp
 - Do not commit `.env`, `projects/`, `frames/`, `*.mp4`, `*.mov`, `*.webm`.
 
 ## Expected environment
+
+> **SUPERSEDED — see "Local Mode".** No `OPENROUTER_API_KEY`. `.env.example` now documents the Ollama + ComfyUI vars. Deps: `express`, `-D vite typescript tsx concurrently dotenv @types/*`.
 
 `.env.example` documents:
 
@@ -110,6 +167,8 @@ Use TypeScript everywhere. Strict mode on.
 
 ### Server endpoints
 
+> Parts of this list are **superseded** — see "Local Mode" for the current `/api/health` shape, `/api/config`, `/api/prompt/enhance`, and the `frameCount` param on `/api/sprites/animate`.
+
 - `GET /api/health` → `{ ok, hasApiKey }`. `hasApiKey` reflects `OPENROUTER_API_KEY` being set.
 - `GET /api/models/video` → `{ models: [{ id, label, defaultDuration }, ...], default: "x-ai/grok-imagine-video" }`. The list is the single source of truth for the client's model dropdown and the server's allowlist.
 - `GET /api/projects/current` → current `projects/latest/` view (hydrated with URLs).
@@ -126,6 +185,8 @@ Use TypeScript everywhere. Strict mode on.
 All error responses are `{ error: string }` with `sk-or-...` and `xai-...` tokens redacted.
 
 ## Initial sprite image generation
+
+> **SUPERSEDED — see "Local Mode" above.** This section describes the old OpenRouter path and is kept only for history. Image generation now goes through ComfyUI + FLUX.1 Schnell via `server/ai/comfyui.ts`.
 
 Image generation goes through OpenRouter's chat-completions endpoint with `modalities: ["image"]`. Default model is `x-ai/grok-imagine-image-quality` (image-only output; do **not** include `"text"` in the modalities array — the model rejects it).
 
@@ -181,6 +242,8 @@ Notes:
 - If you swap to a different image model later, only the `model` string changes; the rest of the chat-completions shape is provider-agnostic.
 
 ## Motion / sequence generation
+
+> **SUPERSEDED — see "Local Mode" above.** OpenRouter image-to-video is gone. Frames are now N independent FLUX.1 Schnell img2img passes (`server/frames.ts`), each chroma-keyed with ffmpeg. No video, no `source.mp4`, no `VIDEO_MODELS` registry.
 
 Two-stage flow:
 
@@ -292,6 +355,8 @@ Tuning hints:
 The reference-sprite preview in column 1 intentionally still shows the green background — it's the *source* image, and keeping the green visible is a useful signal that the chroma layer is doing its job.
 
 ## Frame extraction script
+
+> **SUPERSEDED — removed.** `scripts/extract-frames.sh` and `server/extract-frames.ts` are deleted (no video to extract from). The equivalent chroma-key + scale filter is now `CHROMA_KEY_FILTER` in `server/chroma.ts`, applied per generated frame in `server/frames.ts`.
 
 `scripts/extract-frames.sh`:
 
@@ -435,9 +500,9 @@ Server logs and 4xx responses redact `sk-or-...` and `xai-...` substrings before
 
 ## Security requirements
 
-- All OpenRouter calls server-side.
-- Never log `OPENROUTER_API_KEY`. Redact `sk-or-...` and `xai-...` substrings in error messages.
-- Only send the `Authorization` header to OpenRouter hosts — parse `unsigned_urls` and skip the header if the hostname isn't `openrouter.ai` (or a subdomain).
+- All AI calls server-side; the browser only talks to `/api/*` and `/projects/*`.
+- No secrets to manage — Ollama and ComfyUI are local, unauthenticated. `COMFYUI_BASE_URL` / `OLLAMA_BASE_URL` must stay local/trusted hosts.
+- The old OpenRouter key-redaction and `unsigned_urls` bearer-host rules are removed with the provider.
 - No arbitrary shell commands from the client.
 - All file paths going to ffmpeg or `fs.cp`/`rm` are validated with `ensureInsideRoot`.
 - Project names validated with `safeProjectName` (`^[a-zA-Z0-9_-]{1,40}$`, `"latest"` reserved).
@@ -453,11 +518,11 @@ Server logs and 4xx responses redact `sk-or-...` and `xai-...` substrings before
 
 ## Extending the studio
 
-The shape established by `server/video.ts` is the template for new asset types:
+The `server/ai/` provider layer is the template for new asset types:
 
-- A typed registry (`AUDIO_MODELS`, `BG_MODELS`, …) lists model id + display label + any default parameters.
-- A small generator module makes a typed `fetch` to OpenRouter, handles polling/streaming where needed, and returns a downloadable target (URL + optional headers).
-- The Express layer adds a route and a `GET /api/models/<type>` endpoint that mirrors `GET /api/models/video`.
+- Extend `AIProvider` (or add a sibling backend module under `server/ai/`) with the new capability.
+- A small adapter module (like `server/image.ts` / `server/frames.ts`) appends any directives and delegates to `getProvider()`.
+- The Express layer adds a route and a `GET /api/models/<type>` endpoint.
 - The manifest gains a `<type>Model` field so the loaded project remembers the last choice.
 - The client adds a panel (or extends a column), wires a dropdown driven by the new models endpoint, and reuses the existing project save/load/cache-bust plumbing.
 
