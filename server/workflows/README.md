@@ -40,23 +40,38 @@ A value that is *exactly* a token (`"seed": "%SEED%"`) is replaced with the raw
 number. A token inside a longer string (`"text": "side view, %PROMPT%"`) is
 string-substituted. Unused tokens are harmless.
 
-## Example skeleton (LTX-Video I2V — adapt node names to your ComfyUI version)
+## Example skeleton (LTX-Video 2B I2V)
+
+This matches the ComfyUI **LTXV Image to Video** template (2024–2025). If node
+names differ in your version, load that template, tokenize it, and re-export —
+don't hand-edit this.
 
 ```json
 {
-  "1":  { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "ltx-video-2b-v0.9.5.safetensors" } },
-  "2":  { "class_type": "CLIPLoader", "inputs": { "clip_name": "t5xxl_fp16.safetensors", "type": "ltxv" } },
+  "1":  { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "ltx-video-2b-v0.9.6.safetensors" } },
+  "2":  { "class_type": "CLIPLoader", "inputs": { "clip_name": "t5xxl_fp8_e4m3fn.safetensors", "type": "ltxv" } },
   "3":  { "class_type": "LoadImage", "inputs": { "image": "%IMAGE%" } },
   "4":  { "class_type": "CLIPTextEncode", "inputs": { "text": "%PROMPT%", "clip": ["2", 0] } },
   "5":  { "class_type": "CLIPTextEncode", "inputs": { "text": "%NEG_PROMPT%", "clip": ["2", 0] } },
   "6":  { "class_type": "LTXVImageToVideo",
           "inputs": { "positive": ["4",0], "negative": ["5",0], "vae": ["1",2], "image": ["3",0],
                       "width": "%WIDTH%", "height": "%HEIGHT%", "length": "%FRAMES%", "batch_size": 1 } },
-  "7":  { "class_type": "KSampler",
-          "inputs": { "seed": "%SEED%", "steps": "%STEPS%", "cfg": 3.0, "sampler_name": "euler",
-                      "scheduler": "normal", "denoise": 1.0, "model": ["1",0],
-                      "positive": ["6",0], "negative": ["6",1], "latent_image": ["6",2] } },
-  "8":  { "class_type": "VAEDecode", "inputs": { "samples": ["7",0], "vae": ["1",2] } },
-  "9":  { "class_type": "SaveImage", "inputs": { "filename_prefix": "ags-frame", "images": ["8",0] } }
+  "7":  { "class_type": "LTXVConditioning",
+          "inputs": { "positive": ["6",0], "negative": ["6",1], "frame_rate": 25 } },
+  "8":  { "class_type": "LTXVScheduler",
+          "inputs": { "steps": "%STEPS%", "max_shift": 2.05, "base_shift": 0.95,
+                      "stretch": true, "terminal": 0.1, "latent": ["6",2] } },
+  "9":  { "class_type": "KSamplerSelect", "inputs": { "sampler_name": "euler" } },
+  "10": { "class_type": "SamplerCustom",
+          "inputs": { "add_noise": true, "noise_seed": "%SEED%", "cfg": 3.0,
+                      "model": ["1",0], "positive": ["7",0], "negative": ["7",1],
+                      "sampler": ["9",0], "sigmas": ["8",0], "latent_image": ["6",2] } },
+  "11": { "class_type": "VAEDecode", "inputs": { "samples": ["10",0], "vae": ["1",2] } },
+  "12": { "class_type": "SaveImage", "inputs": { "filename_prefix": "ags-frame", "images": ["11",0] } }
 }
 ```
+
+Tips: LTX wants width/height multiples of 32 and `length` of the form `8n+1`
+(`VIDEO_FRAMES=25` works). Keep `SaveImage` (batch) as the final node so the app
+reads frames directly; a `SaveWEBP`/`VHS_VideoCombine` clip also works (ffmpeg
+splits it).
