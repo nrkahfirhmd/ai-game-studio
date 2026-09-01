@@ -195,20 +195,24 @@ export async function generateImage(
 
   // img2img + a custom end-pose workflow configured → use it (stronger model /
   // ControlNet). Otherwise the built-in FLUX graph.
-  const endPoseWf = config.video.endPoseWorkflowPath;
-  const graph =
-    inputImageName && endPoseWf
-      ? (substituteTokens(await loadCustomWorkflow(endPoseWf), {
-          "%IMAGE%": inputImageName,
-          "%PROMPT%": req.prompt,
-          "%SEED%": seed,
-          "%WIDTH%": width,
-          "%HEIGHT%": height,
-          "%DENOISE%": denoise,
-        }) as Record<string, unknown>)
-      : buildImageWorkflow({ positive: req.prompt, width, height, seed, denoise, inputImageName });
+  const endPoseWf = inputImageName ? config.video.endPoseWorkflowPath : null;
+  const graph = endPoseWf
+    ? (substituteTokens(await loadCustomWorkflow(endPoseWf), {
+        "%IMAGE%": inputImageName as string,
+        "%PROMPT%": req.prompt,
+        "%SEED%": seed,
+        "%WIDTH%": width,
+        "%HEIGHT%": height,
+        "%DENOISE%": denoise,
+      }) as Record<string, unknown>)
+    : buildImageWorkflow({ positive: req.prompt, width, height, seed, denoise, inputImageName });
 
-  const entry = await runWorkflow(graph, imageModel, "image");
+  const entry = await runWorkflow(
+    graph,
+    endPoseWf ?? imageModel,
+    endPoseWf ? "end-pose" : "image",
+    endPoseWf ? `Check the models named in ${endPoseWf} are installed in ComfyUI.` : MODEL_HINT,
+  );
 
   const files = Object.values(entry.outputs ?? {}).flatMap((o) => o.images ?? []);
   const file = files.find((f) => f.type !== "temp") ?? files[0];

@@ -61,11 +61,14 @@ only produce idle/sway motion — the model has no way to reach a specific pose.
 
 **FLUX Schnell (the default sprite model) can't do a big pose change without also
 changing the character.** Low denoise → same pose; high denoise → new person.
-For crisp attacks/jumps, set `COMFYUI_ENDPOSE_WORKFLOW` to an exported img2img
-workflow using a stronger model — **FLUX Dev** (real prompt + img2img adherence)
-or an **SDXL + OpenPose ControlNet** rig (forces the skeleton, keeps identity).
-Tokens: `%IMAGE%` `%PROMPT%` `%SEED%` `%WIDTH%` `%HEIGHT%` `%DENOISE%`. Final node
-must be `SaveImage`.
+Set `COMFYUI_ENDPOSE_WORKFLOW` to an exported img2img workflow using a stronger
+approach. Tokens: `%IMAGE%` `%PROMPT%` `%SEED%` `%WIDTH%` `%HEIGHT%` `%DENOISE%`.
+Final node must be `SaveImage` (single image).
+
+| Workflow | Approach | Setup |
+|---|---|---|
+| [`endpose-controlnet.json`](endpose-controlnet.json) | SDXL rough pose → DWPose skeleton → SDXL + OpenPose ControlNet on the real character | [docs/controlnet-endpose-setup.md](../../docs/controlnet-endpose-setup.md) |
+| _(bring your own)_ | FLUX Dev img2img — follows pose prompts, no ControlNet | just a `flux1-dev` checkpoint |
 
 ## Skeleton (older KSampler-style — adapt to your version)
 

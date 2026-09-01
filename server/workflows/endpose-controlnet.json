@@ -1,0 +1,150 @@
+{
+  "1": {
+    "inputs": { "ckpt_name": "sd_xl_base_1.0.safetensors" },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "SDXL" }
+  },
+  "2": {
+    "inputs": { "image": "%IMAGE%" },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Reference sprite" }
+  },
+  "3": {
+    "inputs": {
+      "image": ["2", 0],
+      "upscale_method": "lanczos",
+      "width": 1024,
+      "height": 1024,
+      "crop": "disabled"
+    },
+    "class_type": "ImageScale",
+    "_meta": { "title": "Reference -> 1024 (SDXL native)" }
+  },
+  "10": {
+    "inputs": {
+      "text": "%PROMPT%, full body, dynamic action pose, side view, clear readable silhouette",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Rough pass positive" }
+  },
+  "11": {
+    "inputs": {
+      "text": "neutral standing, t-pose, static, cropped, out of frame, low quality, blurry, deformed",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Rough pass negative" }
+  },
+  "20": {
+    "inputs": { "pixels": ["3", 0], "vae": ["1", 2] },
+    "class_type": "VAEEncode",
+    "_meta": { "title": "Encode reference" }
+  },
+  "21": {
+    "inputs": {
+      "seed": "%SEED%",
+      "steps": 22,
+      "cfg": 6.5,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.9,
+      "model": ["1", 0],
+      "positive": ["10", 0],
+      "negative": ["11", 0],
+      "latent_image": ["20", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "Rough pose (character drifts, pose is right)" }
+  },
+  "22": {
+    "inputs": { "samples": ["21", 0], "vae": ["1", 2] },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "Decode rough" }
+  },
+  "30": {
+    "inputs": {
+      "image": ["22", 0],
+      "detect_hand": "enable",
+      "detect_body": "enable",
+      "detect_face": "disable",
+      "resolution": 1024,
+      "bbox_detector": "yolox_l.onnx",
+      "pose_estimator": "dw-ll_ucoco_384.onnx"
+    },
+    "class_type": "DWPreprocessor",
+    "_meta": { "title": "Extract OpenPose skeleton (needs comfyui_controlnet_aux)" }
+  },
+  "40": {
+    "inputs": { "control_net_name": "controlnet-openpose-sdxl-1.0.safetensors" },
+    "class_type": "ControlNetLoader",
+    "_meta": { "title": "OpenPose ControlNet (SDXL)" }
+  },
+  "41": {
+    "inputs": {
+      "text": "%PROMPT%. Exact same character, same outfit, same colours, same art style as the source image. Full body, side view. Flat solid pure chroma green background, hex #00b140, no shadows.",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Final positive" }
+  },
+  "42": {
+    "inputs": {
+      "text": "different character, changed outfit, changed colours, extra limbs, missing limbs, low quality, blurry, deformed, background clutter, gradient background",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "Final negative" }
+  },
+  "43": {
+    "inputs": {
+      "positive": ["41", 0],
+      "negative": ["42", 0],
+      "control_net": ["40", 0],
+      "image": ["30", 0],
+      "strength": 0.9,
+      "start_percent": 0.0,
+      "end_percent": 1.0,
+      "vae": ["1", 2]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": { "title": "Apply skeleton" }
+  },
+  "50": {
+    "inputs": {
+      "seed": "%SEED%",
+      "steps": 26,
+      "cfg": 6.5,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": "%DENOISE%",
+      "model": ["1", 0],
+      "positive": ["43", 0],
+      "negative": ["43", 1],
+      "latent_image": ["20", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "Final: reference character, forced into the pose" }
+  },
+  "51": {
+    "inputs": { "samples": ["50", 0], "vae": ["1", 2] },
+    "class_type": "VAEDecode",
+    "_meta": { "title": "Decode final" }
+  },
+  "52": {
+    "inputs": {
+      "image": ["51", 0],
+      "upscale_method": "lanczos",
+      "width": "%WIDTH%",
+      "height": "%HEIGHT%",
+      "crop": "disabled"
+    },
+    "class_type": "ImageScale",
+    "_meta": { "title": "Back to sprite size" }
+  },
+  "60": {
+    "inputs": { "filename_prefix": "ags-endpose", "images": ["52", 0] },
+    "class_type": "SaveImage",
+    "_meta": { "title": "Save end-pose sprite" }
+  }
+}
