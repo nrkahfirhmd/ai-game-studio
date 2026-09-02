@@ -9,58 +9,74 @@
     "class_type": "LoadImage",
     "_meta": { "title": "Reference sprite" }
   },
-  "3": {
-    "inputs": {
-      "image": ["2", 0],
-      "upscale_method": "lanczos",
-      "width": 1024,
-      "height": 1024,
-      "crop": "disabled"
-    },
-    "class_type": "ImageScale",
-    "_meta": { "title": "Reference -> 1024 (SDXL native)" }
+
+  "5": {
+    "inputs": { "model": ["1", 0], "preset": "PLUS (high strength)" },
+    "class_type": "IPAdapterUnifiedLoader",
+    "_meta": { "title": "IPAdapter (needs ComfyUI_IPAdapter_plus)" }
   },
+  "6": {
+    "inputs": {
+      "model": ["5", 0],
+      "ipadapter": ["5", 1],
+      "image": ["2", 0],
+      "weight": 0.85,
+      "weight_type": "linear",
+      "combine_embeds": "concat",
+      "start_at": 0.0,
+      "end_at": 1.0,
+      "embeds_scaling": "V only"
+    },
+    "class_type": "IPAdapterAdvanced",
+    "_meta": { "title": "Inject the sprite's identity into the model" }
+  },
+
   "10": {
     "inputs": {
-      "text": "%PROMPT%, full body, dynamic action pose, side view, clear readable silhouette",
+      "text": "full body athletic figure, %PROMPT%, extreme dynamic mid-action pose, limbs fully extended, exaggerated motion, dramatic martial-arts action photo, side view, single person, plain grey studio background",
       "clip": ["1", 1]
     },
     "class_type": "CLIPTextEncode",
-    "_meta": { "title": "Rough pass positive" }
+    "_meta": { "title": "Rough positive (pure action, identity irrelevant)" }
   },
   "11": {
     "inputs": {
-      "text": "neutral standing, t-pose, static, cropped, out of frame, low quality, blurry, deformed",
+      "text": "neutral standing, idle, arms at sides, t-pose, static, symmetrical, cropped, low quality, blurry, deformed, multiple people",
       "clip": ["1", 1]
     },
     "class_type": "CLIPTextEncode",
-    "_meta": { "title": "Rough pass negative" }
+    "_meta": { "title": "Rough negative" }
   },
-  "20": {
-    "inputs": { "pixels": ["3", 0], "vae": ["1", 2] },
-    "class_type": "VAEEncode",
-    "_meta": { "title": "Encode reference" }
+  "9": {
+    "inputs": { "width": 1024, "height": 1024, "batch_size": 1 },
+    "class_type": "EmptyLatentImage",
+    "_meta": { "title": "Rough: empty latent" }
   },
   "21": {
     "inputs": {
       "seed": "%SEED%",
-      "steps": 22,
-      "cfg": 6.5,
+      "steps": 24,
+      "cfg": 7.0,
       "sampler_name": "dpmpp_2m",
       "scheduler": "karras",
-      "denoise": 0.9,
+      "denoise": 1.0,
       "model": ["1", 0],
       "positive": ["10", 0],
       "negative": ["11", 0],
-      "latent_image": ["20", 0]
+      "latent_image": ["9", 0]
     },
     "class_type": "KSampler",
-    "_meta": { "title": "Rough pose (character drifts, pose is right)" }
+    "_meta": { "title": "Rough pose — throwaway, only its skeleton is kept" }
   },
   "22": {
     "inputs": { "samples": ["21", 0], "vae": ["1", 2] },
     "class_type": "VAEDecode",
     "_meta": { "title": "Decode rough" }
+  },
+  "23": {
+    "inputs": { "filename_prefix": "ags-debug-rough", "images": ["22", 0] },
+    "class_type": "SaveImage",
+    "_meta": { "title": "DEBUG: rough pose" }
   },
   "30": {
     "inputs": {
@@ -74,8 +90,14 @@
       "scale_stick_for_xinsr_cn": "enable"
     },
     "class_type": "DWPreprocessor",
-    "_meta": { "title": "Extract OpenPose skeleton (needs comfyui_controlnet_aux)" }
+    "_meta": { "title": "Extract OpenPose skeleton" }
   },
+  "31": {
+    "inputs": { "filename_prefix": "ags-debug-skeleton", "images": ["30", 0] },
+    "class_type": "SaveImage",
+    "_meta": { "title": "DEBUG: skeleton" }
+  },
+
   "40": {
     "inputs": { "control_net_name": "controlnet-openpose-sdxl-1.0.safetensors" },
     "class_type": "ControlNetLoader",
@@ -83,15 +105,15 @@
   },
   "41": {
     "inputs": {
-      "text": "%PROMPT%. Exact same character, same outfit, same colours, same art style as the source image. Full body, side view. Flat solid pure chroma green background, hex #00b140, no shadows.",
+      "text": "%PROMPT%. 2D game character sprite, full body head to feet, side view, centered. Flat solid pure chroma green background, hex #00b140, no shadows, no ground.",
       "clip": ["1", 1]
     },
     "class_type": "CLIPTextEncode",
-    "_meta": { "title": "Final positive" }
+    "_meta": { "title": "Final positive (identity comes from IPAdapter)" }
   },
   "42": {
     "inputs": {
-      "text": "different character, changed outfit, changed colours, extra limbs, missing limbs, low quality, blurry, deformed, background clutter, gradient background",
+      "text": "extra limbs, missing limbs, cropped, out of frame, low quality, blurry, deformed, background clutter, gradient background, ground, floor, shadow",
       "clip": ["1", 1]
     },
     "class_type": "CLIPTextEncode",
@@ -103,29 +125,34 @@
       "negative": ["42", 0],
       "control_net": ["40", 0],
       "image": ["30", 0],
-      "strength": 0.9,
+      "strength": 0.8,
       "start_percent": 0.0,
-      "end_percent": 1.0,
+      "end_percent": 0.9,
       "vae": ["1", 2]
     },
     "class_type": "ControlNetApplyAdvanced",
     "_meta": { "title": "Apply skeleton" }
   },
+  "49": {
+    "inputs": { "width": 1024, "height": 1024, "batch_size": 1 },
+    "class_type": "EmptyLatentImage",
+    "_meta": { "title": "Final: empty latent (no standing bias)" }
+  },
   "50": {
     "inputs": {
       "seed": "%SEED%",
-      "steps": 26,
-      "cfg": 6.5,
+      "steps": 28,
+      "cfg": 6.0,
       "sampler_name": "dpmpp_2m",
       "scheduler": "karras",
-      "denoise": "%DENOISE%",
-      "model": ["1", 0],
+      "denoise": 1.0,
+      "model": ["6", 0],
       "positive": ["43", 0],
       "negative": ["43", 1],
-      "latent_image": ["20", 0]
+      "latent_image": ["49", 0]
     },
     "class_type": "KSampler",
-    "_meta": { "title": "Final: reference character, forced into the pose" }
+    "_meta": { "title": "Final: IPAdapter identity + skeleton pose, from scratch" }
   },
   "51": {
     "inputs": { "samples": ["50", 0], "vae": ["1", 2] },
