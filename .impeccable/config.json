@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-09-01T03:41:31.626Z",
+        "reason": "pre-existing repo font, unchanged by local-AI migration; AGENTS.md pins UI to mockup.png"
+      }
+    ]
+  }
+}

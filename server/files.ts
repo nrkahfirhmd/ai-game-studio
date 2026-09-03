@@ -10,7 +10,6 @@ export const LATEST_DIR = path.join(PROJECTS_DIR, "latest");
 export const PROJECT_FILES = {
   manifest: "sprite.json",
   ref: "ref/sprite.png",
-  source: "source.mp4",
   framesDir: "frames",
   spritesheet: "spritesheet.png",
   previewGif: "preview.gif",
@@ -43,18 +42,6 @@ export async function saveDataUrlPng(dataUrl: string, outputPath: string): Promi
   const match = dataUrl.match(/^data:image\/(png|jpeg);base64,(.+)$/);
   if (!match) throw new Error("invalid data URL");
   await saveBase64Image(match[2], outputPath);
-}
-
-export async function downloadVideo(
-  url: string,
-  outputPath: string,
-  headers?: Record<string, string>,
-): Promise<void> {
-  await mkdir(path.dirname(outputPath), { recursive: true });
-  const res = await fetch(url, headers ? { headers } : undefined);
-  if (!res.ok) throw new Error(`video download failed (${res.status})`);
-  const arrayBuffer = await res.arrayBuffer();
-  await writeFile(outputPath, Buffer.from(arrayBuffer));
 }
 
 export function readPngDims(buf: Buffer): { w: number; h: number } | null {

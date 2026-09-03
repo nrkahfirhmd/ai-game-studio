@@ -5,8 +5,9 @@ import type {
   VideoModelOption,
 } from "./api";
 
-export const DEFAULT_IMAGE_MODEL = "openai/gpt-image-2";
-export const DEFAULT_VIDEO_MODEL = "x-ai/grok-imagine-video";
+// Fallbacks only — the real list + default come from /api/models/*.
+export const DEFAULT_IMAGE_MODEL = "flux1-schnell-fp8.safetensors";
+export const DEFAULT_VIDEO_MODEL = "svd_xt.safetensors";
 
 export type AppStatus =
   | "idle"

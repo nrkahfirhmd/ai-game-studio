@@ -8,6 +8,7 @@ import {
   projectDir,
   safeProjectName,
 } from "./files.js";
+import { config } from "./config.js";
 
 export interface ProjectManifest {
   name: string;
@@ -43,9 +44,9 @@ export function emptyManifest(name = "latest"): ProjectManifest {
   return {
     name,
     spritePrompt: "",
-    spriteModel: "openai/gpt-image-2",
+    spriteModel: config.comfyui.imageModel,
     motionPrompt: "",
-    motionModel: "x-ai/grok-imagine-video",
+    motionModel: config.video.workflowPath ?? config.video.model,
     sprite: null,
     spriteDimensions: null,
     frames: [],

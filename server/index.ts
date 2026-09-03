@@ -1,29 +1,28 @@
 import "dotenv/config";
-import express, { type Request, type Response, type NextFunction } from "express";
+import express, { type Response } from "express";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { config } from "./config.js";
+import { getProvider } from "./ai/provider.js";
+import {
+  BackendUnavailableError,
+  GenerationError,
+  ModelNotInstalledError,
+} from "./ai/types.js";
 import {
   DEFAULT_IMAGE_MODEL,
   IMAGE_MODELS,
   generateSpriteImage,
-  isImageModelId,
 } from "./image.js";
-import {
-  DEFAULT_VIDEO_MODEL,
-  VIDEO_MODELS,
-  defaultDurationFor,
-  generateSpriteMotionVideo,
-  isVideoModelId,
-} from "./video.js";
-import { extractFrames } from "./extract-frames.js";
+import { enhancePrompt, type EnhanceKind } from "./prompt.js";
+import { generateFrames } from "./frames.js";
 import { buildPreviewGif } from "./build-gif.js";
 import {
   LATEST_DIR,
   PROJECTS_DIR,
   PROJECT_FILES,
   ROOT_DIR,
-  downloadVideo,
   ensureInsideRoot,
   readPngDims,
   saveBase64Image,
@@ -43,24 +42,26 @@ import {
 } from "./projects.js";
 import { rm } from "node:fs/promises";
 
-const PORT = Number(process.env.PORT ?? 8787);
-const HAS_KEY = Boolean(process.env.OPENROUTER_API_KEY);
+const PORT = config.port;
+
+// Motion "model" dropdown → the image-to-video backend. `defaultDuration` keeps
+// its client-side field name but now carries the native frame count.
+const DEFAULT_VIDEO_MODEL = config.video.workflowPath ?? config.video.model;
+const VIDEO_MODELS = [
+  {
+    id: DEFAULT_VIDEO_MODEL,
+    label: config.video.workflowPath
+      ? `Custom workflow (${path.basename(config.video.workflowPath)})`
+      : "Stable Video Diffusion (ComfyUI)",
+    defaultDuration: config.video.frames,
+  },
+];
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 app.use("/projects", express.static(PROJECTS_DIR, { fallthrough: false }));
 
-function requireKey(_req: Request, res: Response, next: NextFunction) {
-  if (!HAS_KEY) {
-    res.status(500).json({
-      error: "OPENROUTER_API_KEY is not configured. Add it to .env and restart the server.",
-    });
-    return;
-  }
-  next();
-}
-
-function asString(v: unknown, name: string, max = 2_000): string {
+function asString(v: unknown, name: string, max = 4_000): string {
   if (typeof v !== "string" || v.trim().length === 0) {
     throw new Error(`${name} is required`);
   }
@@ -69,23 +70,43 @@ function asString(v: unknown, name: string, max = 2_000): string {
 }
 
 function asImageRef(v: unknown): string {
-  if (typeof v !== "string" || v.length === 0) {
-    throw new Error("image is required");
-  }
+  if (typeof v !== "string" || v.length === 0) throw new Error("image is required");
   if (v.length > 50_000_000) throw new Error("image is too large");
   return v;
 }
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, hasApiKey: HAS_KEY });
+app.get("/api/health", async (_req, res) => {
+  try {
+    const h = await getProvider().health();
+    res.json({ ok: true, ...h });
+  } catch {
+    res.json({ ok: false });
+  }
+});
+
+app.get("/api/models/image", (_req, res) => {
+  res.json({ models: IMAGE_MODELS, default: DEFAULT_IMAGE_MODEL });
 });
 
 app.get("/api/models/video", (_req, res) => {
   res.json({ models: VIDEO_MODELS, default: DEFAULT_VIDEO_MODEL });
 });
 
-app.get("/api/models/image", (_req, res) => {
-  res.json({ models: IMAGE_MODELS, default: DEFAULT_IMAGE_MODEL });
+app.get("/api/config", (_req, res) => {
+  res.json({ promptEnhancer: config.features.promptEnhancer });
+});
+
+app.post("/api/prompt/enhance", async (req, res) => {
+  try {
+    if (!config.features.promptEnhancer) throw new Error("prompt enhancer is disabled");
+    const kind = req.body?.kind;
+    if (kind !== "sprite" && kind !== "motion") throw new Error("kind must be 'sprite' or 'motion'");
+    const prompt = asString(req.body?.prompt, "prompt");
+    const enhanced = await enhancePrompt(kind as EnhanceKind, prompt);
+    res.json({ enhanced });
+  } catch (err) {
+    handleError(err, res);
+  }
 });
 
 app.get("/api/projects/current", async (_req, res) => {
@@ -106,8 +127,7 @@ app.get("/api/projects", async (_req, res) => {
 
 app.post("/api/projects/save", async (req, res) => {
   try {
-    const name = asString(req.body?.name, "name", 40);
-    res.json(await saveLatestAs(name));
+    res.json(await saveLatestAs(asString(req.body?.name, "name", 40)));
   } catch (err) {
     handleError(err, res);
   }
@@ -115,8 +135,7 @@ app.post("/api/projects/save", async (req, res) => {
 
 app.post("/api/projects/load", async (req, res) => {
   try {
-    const name = asString(req.body?.name, "name", 40);
-    res.json(await loadProjectIntoLatest(name));
+    res.json(await loadProjectIntoLatest(asString(req.body?.name, "name", 40)));
   } catch (err) {
     handleError(err, res);
   }
@@ -124,9 +143,7 @@ app.post("/api/projects/load", async (req, res) => {
 
 app.post("/api/projects/new", async (_req, res) => {
   try {
-    if (existsSync(LATEST_DIR)) {
-      await rm(LATEST_DIR, { recursive: true, force: true });
-    }
+    if (existsSync(LATEST_DIR)) await rm(LATEST_DIR, { recursive: true, force: true });
     res.json(toView(emptyManifest("latest")));
   } catch (err) {
     handleError(err, res);
@@ -135,8 +152,7 @@ app.post("/api/projects/new", async (_req, res) => {
 
 app.post("/api/projects/delete", async (req, res) => {
   try {
-    const name = asString(req.body?.name, "name", 40);
-    await deleteSavedProject(name);
+    await deleteSavedProject(asString(req.body?.name, "name", 40));
     res.json({ ok: true });
   } catch (err) {
     handleError(err, res);
@@ -149,8 +165,7 @@ app.post("/api/projects/selection", async (req, res) => {
     if (!Array.isArray(indices) || indices.some((i) => typeof i !== "number")) {
       throw new Error("selectedIndices must be an array of numbers");
     }
-    const m = await updateLatest({ selectedFrameIndices: indices });
-    res.json(toView(m));
+    res.json(toView(await updateLatest({ selectedFrameIndices: indices })));
   } catch (err) {
     handleError(err, res);
   }
@@ -164,13 +179,14 @@ app.post("/api/projects/spritesheet", async (req, res) => {
 
     let m = await updateLatest({ spritesheet: PROJECT_FILES.spritesheet });
 
-    // Best-effort GIF build from current selection
     try {
       const gifName = await buildPreviewGif(m.selectedFrameIndices);
       m = await updateLatest({ previewGif: gifName });
     } catch (gifErr) {
-      const msg = gifErr instanceof Error ? gifErr.message : String(gifErr);
-      console.warn("[api] preview gif build failed:", msg);
+      console.warn(
+        "[api] preview gif build failed:",
+        gifErr instanceof Error ? gifErr.message : String(gifErr),
+      );
       m = await updateLatest({ previewGif: null });
     }
 
@@ -180,27 +196,20 @@ app.post("/api/projects/spritesheet", async (req, res) => {
   }
 });
 
-app.post("/api/sprites/generate", requireKey, async (req, res) => {
+app.post("/api/sprites/generate", async (req, res) => {
   try {
     const prompt = asString(req.body?.prompt, "prompt");
-    const requestedModel = req.body?.model;
-    if (requestedModel !== undefined && !isImageModelId(requestedModel)) {
-      throw new Error("unsupported image model");
-    }
-    const model = requestedModel ?? DEFAULT_IMAGE_MODEL;
-    const base64 = await generateSpriteImage(prompt, model);
+    const base64 = await generateSpriteImage(prompt);
 
-    // Reset downstream artifacts (frames + spritesheet) before writing the new sprite
     await wipeLatestFramesAndSheet();
 
     const refAbs = path.join(LATEST_DIR, PROJECT_FILES.ref);
     await saveBase64Image(base64, refAbs);
-    const buf = await readFile(refAbs);
-    const dims = readPngDims(buf);
+    const dims = readPngDims(await readFile(refAbs));
 
     const m = await updateLatest({
       spritePrompt: prompt,
-      spriteModel: model,
+      spriteModel: DEFAULT_IMAGE_MODEL,
       sprite: PROJECT_FILES.ref,
       spriteDimensions: dims,
       frames: [],
@@ -209,38 +218,32 @@ app.post("/api/sprites/generate", requireKey, async (req, res) => {
       previewGif: null,
     });
 
-    res.json({
-      view: toView(m),
-      dataUrl: `data:image/png;base64,${base64}`,
-    });
+    res.json({ view: toView(m), dataUrl: `data:image/png;base64,${base64}` });
   } catch (err) {
     handleError(err, res);
   }
 });
 
-app.post("/api/sprites/animate", requireKey, async (req, res) => {
+app.post("/api/sprites/animate", async (req, res) => {
   try {
     const image = asImageRef(req.body?.image);
     const text = asString(req.body?.text, "text");
-    const model = isVideoModelId(req.body?.model) ? req.body.model : DEFAULT_VIDEO_MODEL;
-    const duration =
-      typeof req.body?.duration === "number" ? req.body.duration : defaultDurationFor(model);
 
     const imageInput = await resolveImageInput(image);
 
     await wipeLatestSpritesheet();
 
-    const video = await generateSpriteMotionVideo(imageInput, text, duration, model);
-    const videoAbs = path.join(LATEST_DIR, PROJECT_FILES.source);
-    await downloadVideo(video.url, videoAbs, video.headers);
-
     const framesAbs = path.join(LATEST_DIR, PROJECT_FILES.framesDir);
-    const frameFiles = await extractFrames(videoAbs, framesAbs);
+    const frameFiles = await generateFrames({
+      image: imageInput,
+      motionPrompt: text,
+      framesDir: framesAbs,
+    });
     const frames = frameFiles.map((f) => `${PROJECT_FILES.framesDir}/${f}`);
 
     const m = await updateLatest({
       motionPrompt: text,
-      motionModel: model,
+      motionModel: DEFAULT_VIDEO_MODEL,
       frames,
       selectedFrameIndices: frames.map((_, i) => i),
       spritesheet: null,
@@ -263,24 +266,44 @@ async function resolveImageInput(image: string): Promise<string> {
     const buf = await readFile(abs);
     return `data:image/png;base64,${buf.toString("base64")}`;
   }
-  if (/^https?:\/\//.test(image)) return image;
   throw new Error("unsupported image reference");
 }
 
 function handleError(err: unknown, res: Response) {
   const message = err instanceof Error ? err.message : "Unknown error";
-  const safe = redact(message);
-  console.error("[api error]", safe);
-  res.status(400).json({ error: safe });
-}
+  console.error("[api error]", err);
 
-function redact(msg: string): string {
-  return msg.replace(/sk-or-[A-Za-z0-9_-]+/g, "***");
+  let status = 400;
+  if (err instanceof BackendUnavailableError) status = 503;
+  else if (err instanceof ModelNotInstalledError) status = 422;
+  else if (err instanceof GenerationError) status = 502;
+
+  res.status(status).json({ error: message });
 }
 
 app.listen(PORT, () => {
   console.log(`[server] listening on http://localhost:${PORT}`);
-  if (!HAS_KEY) {
-    console.warn("[server] WARNING: OPENROUTER_API_KEY is missing — endpoints will return 500");
-  }
+  getProvider()
+    .health()
+    .then((h) => {
+      if (!h.text.reachable) {
+        console.warn(
+          `[server] Ollama unreachable at ${h.text.baseUrl} — text/enhancer disabled until it is running (ollama serve)`,
+        );
+      } else if (!h.text.installed) {
+        console.warn(
+          `[server] Ollama model "${h.text.model}" not installed — run: ollama pull ${h.text.model}`,
+        );
+      }
+      if (!h.image.reachable) {
+        console.warn(
+          `[server] ComfyUI unreachable at ${h.image.baseUrl} — image generation will fail until it is running (python main.py)`,
+        );
+      } else if (!h.image.installed) {
+        console.warn(
+          `[server] ComfyUI checkpoint "${h.image.model}" not found in models/checkpoints/`,
+        );
+      }
+    })
+    .catch(() => {});
 });
